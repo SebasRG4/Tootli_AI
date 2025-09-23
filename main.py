@@ -33,7 +33,7 @@ app = FastAPI()
 
 # --- LÓGICA DE LA IA CON GOOGLE GEMINI ---
 def get_recommendation_from_gemini(request: RecommendationRequest):
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-1.5-pro')
 
     # Creamos el prompt para Gemini (muy similar al que usabas para OpenAI)
     prompt_parts = [
