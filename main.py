@@ -2,20 +2,20 @@ import os
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 
 # --- CONFIGURACIÓN ---
-# Carga la API key desde las variables de entorno de Render
 try:
-    # REEMPLAZA "GOOGLE_API_KEY" CON EL NOMBRE DE TU VARIABLE DE ENTORNO EN RENDER
-    GOOGLE_API_KEY = os.environ['GOOGLE_API_KEY'] 
+    GOOGLE_API_KEY = os.environ['GOOGLE_API_KEY']
     genai.configure(api_key=GOOGLE_API_KEY)
 except KeyError:
-    # Si la variable no está, el servicio no iniciará (esto es bueno para detectar errores)
     raise RuntimeError("La variable de entorno GOOGLE_API_KEY no está configurada.")
 
-# --- MODELOS DE DATOS (Pydantic) ---
-# Estos no cambian, son los que tu backend de Laravel envía
+# --- MODELOS DE DATOS ---
+class Message(BaseModel):
+    role: str  # 'user' o 'model'
+    content: str
+
 class Candidate(BaseModel):
     id: int
     name: str
@@ -26,7 +26,8 @@ class Candidate(BaseModel):
 class RecommendationRequest(BaseModel):
     user_query: str
     user_name: str
-    candidates: List[Candidate]
+    candidates: Optional[List[Candidate]] = None  # Opcional para turnos posteriores
+    history: Optional[List[Message]] = None  # Historial de mensajes previos
 
 # --- INICIALIZACIÓN DE FASTAPI ---
 app = FastAPI()
@@ -35,40 +36,36 @@ app = FastAPI()
 def get_recommendation_from_gemini(request: RecommendationRequest):
     model = genai.GenerativeModel('gemini-2.5-flash-lite')
 
-    # Creamos el prompt para Gemini (muy similar al que usabas para OpenAI)
-    prompt_parts = [
-        f"Analiza la lista de restaurantes candidatos basándote en la búsqueda del usuario: '{request.user_query}'."
-        "Tu respuesta debe ser **muy breve, conversacional y amigable** (máximo 3 frases en total), ideal para un *snippet* de aplicación."
-        "Recomienda **un único** restaurante que sea la mejor opción y justifica tu elección de forma concisa."
-        "Si ninguno de los candidatos es una buena opción, indica amablemente que no se encontró un lugar ideal y sugiere intentar otra búsqueda."
-        "\nCandidatos:"
-    ]
+    # Preparar el historial para el chat (si no hay, inicia vacío)
+    chat_history = []
+    if request.history:
+        for msg in request.history:
+            chat_history.append({"role": msg.role, "parts": [msg.content]})
 
-    for c in request.candidates:
-        prompt_parts.append(f"- ID: {c.id}, Nombre: {c.name}, Descripción: {c.description}, Precio Promedio: {c.avg_price_for_two}")
-    
-    prompt_parts.append("\nRespuesta del asistente:")
+    # Iniciar el chat con el historial
+    chat = model.start_chat(history=chat_history)
+
+    # Crear el prompt inicial/conversacional
+    prompt = f"Responde de forma conversacional y amigable a la consulta del usuario '{request.user_name}': '{request.user_query}'."
+    if request.candidates:  # Solo incluye candidatos en la primera llamada
+        prompt += "\nAnaliza estos restaurantes candidatos y recomienda el mejor (o ninguno si no encaja). Sé breve (máx 3 frases)."
+        for c in request.candidates:
+            prompt += f"\n- ID: {c.id}, Nombre: {c.name}, Descripción: {c.description}, Precio Promedio: {c.avg_price_for_two}"
+    else:
+        prompt += "\nContinúa la conversación basada en el historial, recomendando o aclarando si es necesario."
 
     try:
-        # Hacemos la llamada a la API de Gemini
-        response = model.generate_content(prompt_parts)
-        
-        # Devolvemos la respuesta en el formato que espera Laravel
+        # Enviar el prompt al chat y obtener la respuesta
+        response = chat.send_message(prompt)
         return {"responseText": response.text}
 
     except Exception as e:
-        # Capturamos cualquier error de la API de Google
         print(f"Error al llamar a la API de Gemini: {e}")
-        raise HTTPException(
-            status_code=503, 
-            detail="El servicio de IA (Gemini) no está disponible en este momento."
-        )
-
+        raise HTTPException(status_code=503, detail="El servicio de IA (Gemini) no está disponible.")
 
 # --- ENDPOINT DE LA API ---
 @app.post("/recommend")
 async def recommend_dineout(request: RecommendationRequest):
-    # Aquí ya no hay límite de peticiones nuestro, solo llamamos a la función de Gemini
     return get_recommendation_from_gemini(request)
 
 @app.get("/")
