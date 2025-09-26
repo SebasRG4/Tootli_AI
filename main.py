@@ -37,12 +37,11 @@ def get_recommendation_from_gemini(request: RecommendationRequest):
 
     # Creamos el prompt para Gemini (muy similar al que usabas para OpenAI)
     prompt_parts = [
-        f"Un usuario llamado {request.user_name} está buscando: '{request.user_query}'.",
-        "Basado en su búsqueda, analiza la siguiente lista de restaurantes candidatos y responde en español.",
-        "Tu respuesta debe ser conversacional, amigable y útil, como un asistente personal.",
-        "Menciona el restaurante que crees que es la mejor opción y explica brevemente por qué.",
-        "Si ninguno parece una buena opción, dilo amablemente y sugiere intentar otra búsqueda.",
-        "\nCandidatos:",
+        f"Analiza la lista de restaurantes candidatos basándote en la búsqueda del usuario: '{request.user_query}'."
+        "Tu respuesta debe ser **muy breve, conversacional y amigable** (máximo 3 frases en total), ideal para un *snippet* de aplicación."
+        "Recomienda **un único** restaurante que sea la mejor opción y justifica tu elección de forma concisa."
+        "Si ninguno de los candidatos es una buena opción, indica amablemente que no se encontró un lugar ideal y sugiere intentar otra búsqueda."
+        "\nCandidatos:"
     ]
 
     for c in request.candidates:
