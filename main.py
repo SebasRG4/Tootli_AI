@@ -31,7 +31,7 @@ class RecommendationRequest(BaseModel):
 app = FastAPI()
 
 def get_recommendation_from_gemini(request: RecommendationRequest):
-    model = genai.GenerativeModel('gemini-1.5-flash-latest') # Actualizado a un modelo más reciente
+    model = genai.GenerativeModel('gemini-2.5-flash-lite')
     chat_history = []
     if request.history:
         for msg in request.history:
