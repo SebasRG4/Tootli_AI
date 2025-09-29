@@ -21,7 +21,7 @@ class Candidate(BaseModel):
     address: str
     avg_price_for_two: float
     description: str
-    tags: List[str] = Field(default_factory=list)
+    tags: Optional[List[str]] = Field(default_factory=list)
     discount_info: Optional[str] = None
     rating: Optional[float] = None
     serves_alcohol: Optional[bool] = None
@@ -29,12 +29,20 @@ class Candidate(BaseModel):
     delivery_time: Optional[str] = None
     tipo_cocina: Optional[str] = None
 
+    # Permitir campos extra para evitar errores 422
+    class Config:
+        extra = "ignore"
+
 class RecommendationRequest(BaseModel):
     user_query: str
     user_name: str
     filters: Optional[Dict[str, Any]] = Field(default_factory=dict)
     candidates: Optional[List[Candidate]] = None
     history: Optional[List[Message]] = None
+
+    # Permitir campos extra para evitar errores 422
+    class Config:
+        extra = "ignore"
 
 app = FastAPI()
 
@@ -67,23 +75,27 @@ Al final incluir exactamente: [RECOMENDACION_IDS: id1, id2, ...]"""
     if request.candidates and len(request.candidates) > 0:
         prompt += f"\n\nRESTAURANTES DISPONIBLES ({len(request.candidates)} encontrados):"
         for c in request.candidates:
-            # Construir características destacadas
+            # Construir características destacadas (con valores por defecto seguros)
             features = []
-            if c.featured: features.append("⭐ Destacado")
-            if c.serves_alcohol: features.append("🍷 Sirve alcohol")
-            if c.rating and c.rating >= 4.0: features.append(f"🌟 Rating: {c.rating}")
-            if c.delivery_time: features.append(f"⏱️ {c.delivery_time}")
+            if getattr(c, 'featured', None): features.append("⭐ Destacado")
+            if getattr(c, 'serves_alcohol', None): features.append("🍷 Sirve alcohol")
+            if getattr(c, 'rating', None) and c.rating >= 4.0: features.append(f"🌟 Rating: {c.rating}")
+            if getattr(c, 'delivery_time', None): features.append(f"⏱️ {c.delivery_time}")
             
             features_str = " | ".join(features) if features else "Estándar"
             
             # Tags como elementos clave para el análisis
-            tags_str = " | ".join(c.tags) if c.tags else "Sin tags específicos"
+            tags = getattr(c, 'tags', [])
+            tags_str = " | ".join(tags) if tags else "Sin tags específicos"
+            
+            discount_info = getattr(c, 'discount_info', None)
+            tipo_cocina = getattr(c, 'tipo_cocina', 'Cocina variada')
             
             prompt += f"""
 - ID: {c.id} | **{c.name}**
-  💰 ${c.avg_price_for_two} para dos | {c.tipo_cocina or 'Cocina variada'}
+  💰 ${c.avg_price_for_two} para dos | {tipo_cocina}
   🏷️ TAGS: {tags_str}
-  ✨ {features_str}{f" | 🎯 {c.discount_info}" if c.discount_info else ""}
+  ✨ {features_str}{f" | 🎯 {discount_info}" if discount_info else ""}
   📍 {c.address}"""
         
         prompt += f"\n\nANÁLISIS: Basándote en los TAGS y características, recomienda los que mejor coincidan con '{request.user_query}'."
@@ -112,11 +124,26 @@ Al final incluir exactamente: [RECOMENDACION_IDS: id1, id2, ...]"""
 @app.post("/recommend")
 async def recommend_dineout(request: RecommendationRequest):
     try:
+        print(f"Request recibido: {request.dict()}")  # DEBUG
         return get_recommendation_from_gemini(request)
     except ValidationError as e:
-        print(f"Validation Error: {e.json()}")
+        print(f"Validation Error: {e}")
+        print(f"Validation Error details: {e.errors()}")  # DEBUG
         raise HTTPException(status_code=422, detail=f"Invalid request: {e.errors()}")
 
 @app.get("/")
 def read_root():
     return {"status": "Tootli AI Service is running"}
+
+# Nuevo endpoint para debug
+@app.post("/debug-recommend")
+async def debug_recommend_dineout(request: dict):
+    """Endpoint para debug que acepta cualquier JSON"""
+    try:
+        print(f"Debug Request: {request}")
+        # Convertir el dict a RecommendationRequest
+        recommendation_request = RecommendationRequest(**request)
+        return get_recommendation_from_gemini(recommendation_request)
+    except Exception as e:
+        print(f"Debug Error: {e}")
+        return {"error": str(e), "received_data": request}
