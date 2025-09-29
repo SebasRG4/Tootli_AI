@@ -3,7 +3,7 @@ import re
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 try:
     GOOGLE_API_KEY = os.environ['GOOGLE_API_KEY']
@@ -21,10 +21,18 @@ class Candidate(BaseModel):
     address: str
     avg_price_for_two: float
     description: str
+    tags: List[str] = Field(default_factory=list)
+    discount_info: Optional[str] = None
+    rating: Optional[float] = None
+    serves_alcohol: Optional[bool] = None
+    featured: Optional[bool] = None
+    delivery_time: Optional[str] = None
+    tipo_cocina: Optional[str] = None
 
 class RecommendationRequest(BaseModel):
     user_query: str
     user_name: str
+    filters: Optional[Dict[str, Any]] = Field(default_factory=dict)
     candidates: Optional[List[Candidate]] = None
     history: Optional[List[Message]] = None
 
@@ -35,23 +43,52 @@ def get_recommendation_from_gemini(request: RecommendationRequest):
     chat_history = []
     if request.history:
         for msg in request.history:
-            # Asegurarse de que el historial tenga el formato correcto para la API
             role = "user" if msg.role == "user" else "model"
             chat_history.append({"role": role, "parts": [msg.content]})
 
     chat = model.start_chat(history=chat_history)
     
-    prompt = f"Eres un asistente amigable para encontrar restaurantes llamado Tootli. Responde de forma conversacional y amigable a la consulta del usuario '{request.user_name}': '{request.user_query}'."
-    
+    # PROMPT MEJORADO CON TAGS Y CARACTERÍSTICAS
+    prompt = f"""Eres Toot, un asistente especializado en recomendaciones de restaurantes. Responde de forma conversacional pero perspicaz a {request.user_name}.
+
+Consulta: "{request.user_query}"
+Filtros aplicados: {request.filters if request.filters else 'Ninguno'}
+
+INSTRUCCIONES:
+- Analiza los TAGS y características únicas de cada restaurante
+- Prioriza restaurantes que coincidan con la consulta mediante sus tags
+- Destaca: características premium, descuentos, ratings altos, servicios especiales
+- Sé específico y conciso (máximo 3-4 frases)
+- Explica por qué estos restaurantes son buenas opciones
+
+FORMATO OBLIGATORIO:
+Al final incluir exactamente: [RECOMENDACION_IDS: id1, id2, ...]"""
+
     if request.candidates and len(request.candidates) > 0:
-        prompt += "\nAnaliza estos restaurantes candidatos y recomienda los que mejor encajen. Sé breve (máx 3 frases)."
-        prompt += "\nAl final de tu respuesta, DEBES incluir una lista de los IDs de los restaurantes recomendados en el formato: [RECOMENDACION_IDS: id1, id2, ...]."
-        prompt += "\nSi ninguno encaja, responde que no encontraste nada y devuelve [RECOMENDACION_IDS: ]."
-        prompt += "\nCandidatos:"
+        prompt += f"\n\nRESTAURANTES DISPONIBLES ({len(request.candidates)} encontrados):"
         for c in request.candidates:
-            prompt += f"\n- ID: {c.id}, Nombre: {c.name}, Descripción: {c.description}, Precio Promedio: {c.avg_price_for_two}"
+            # Construir características destacadas
+            features = []
+            if c.featured: features.append("⭐ Destacado")
+            if c.serves_alcohol: features.append("🍷 Sirve alcohol")
+            if c.rating and c.rating >= 4.0: features.append(f"🌟 Rating: {c.rating}")
+            if c.delivery_time: features.append(f"⏱️ {c.delivery_time}")
+            
+            features_str = " | ".join(features) if features else "Estándar"
+            
+            # Tags como elementos clave para el análisis
+            tags_str = " | ".join(c.tags) if c.tags else "Sin tags específicos"
+            
+            prompt += f"""
+- ID: {c.id} | **{c.name}**
+  💰 ${c.avg_price_for_two} para dos | {c.tipo_cocina or 'Cocina variada'}
+  🏷️ TAGS: {tags_str}
+  ✨ {features_str}{f" | 🎯 {c.discount_info}" if c.discount_info else ""}
+  📍 {c.address}"""
+        
+        prompt += f"\n\nANÁLISIS: Basándote en los TAGS y características, recomienda los que mejor coincidan con '{request.user_query}'."
     else:
-        prompt += "\nNo se encontraron restaurantes para esta búsqueda. Sugiere al usuario que intente con otra consulta o más detalles. Termina tu respuesta con [RECOMENDACION_IDS: ]."
+        prompt += "\n\nNo se encontraron restaurantes para esta búsqueda. Sugiere al usuario que intente con otros términos o menos filtros. Termina tu respuesta con [RECOMENDACION_IDS: ]."
 
     try:
         response = chat.send_message(prompt)
