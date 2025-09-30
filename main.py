@@ -29,7 +29,6 @@ class Candidate(BaseModel):
     delivery_time: Optional[str] = None
     tipo_cocina: Optional[str] = None
 
-    # Permitir campos extra para evitar errores 422
     class Config:
         extra = "ignore"
 
@@ -39,8 +38,8 @@ class RecommendationRequest(BaseModel):
     filters: Optional[Dict[str, Any]] = Field(default_factory=dict)
     candidates: Optional[List[Candidate]] = None
     history: Optional[List[Message]] = None
+    previous_candidate_ids: Optional[List[int]] = None
 
-    # Permitir campos extra para evitar errores 422
     class Config:
         extra = "ignore"
 
@@ -55,54 +54,51 @@ def get_recommendation_from_gemini(request: RecommendationRequest):
             chat_history.append({"role": role, "parts": [msg.content]})
 
     chat = model.start_chat(history=chat_history)
-    
-    # PROMPT MEJORADO CON TAGS Y CARACTERÍSTICAS
-    prompt = f"""¡Hola! Eres Toot, un asistente súper amigable que ayuda a encontrar los mejores restaurantes, como si le recomendaras a un amigo cercano. Responde a {request.user_name} con un tono cálido, relajado y entusiasta.
+
+    # PROMPT MEJORADO CON TAGS Y REFINAMIENTO
+    prompt = f"""¡Hola! Eres Toot, un asistente amigable que ayuda a encontrar restaurantes.
 
 Consulta: "{request.user_query}"
 Filtros aplicados: {request.filters if request.filters else 'Ninguno'}
 
-INSTRUCCIONES:
-- Analiza los TAGS y características de cada restaurante para encontrar los que mejor encajen con la consulta.
-- Prioriza restaurantes cuyos tags o descripción coincidan con la consulta (por ejemplo, si piden 'vista panorámica', busca tags relacionados con vistas o descripciones que sugieran algo similar).
-- Sé breve (3-4 frases por recomendación) y explica por qué cada restaurante es una gran opción, destacando cosas como vistas, ambiente, descuentos, ratings altos (4.0+), o servicios especiales (como alcohol o entrega rápida).
-- Usa un tono como si charlaras con un amigo: evita jerga técnica, sé cálido y cercano.
-- NO menciones los IDs de los restaurantes en el texto de la respuesta.
-- NO uses formato de negritas (como **nombre**) para los nombres de los restaurantes.
-- Si no hay restaurantes con tags exactos, sugiere opciones que puedan encajar basándote en la descripción o tipo de cocina.
-- Si no hay candidatos, di algo amable como: "¡Vaya, no encontré nada justo para esto! Prueba con otros términos o quita algunos filtros."
+REGLAS OBLIGATORIAS:
+1) SOLO puedes recomendar restaurantes que estén en la lista "RESTAURANTES DISPONIBLES" que te proveo abajo.
+2) Si el request incluye "previous_candidate_ids", considera que el usuario está refinando una búsqueda previa. En ese caso debes RECOMENDAR SOLO aquellos restaurantes que:
+   a) estén en la lista de candidatos proporcionada y
+   b) además estén dentro de previous_candidate_ids (es decir, intersecta la nueva elección con los previos).
+   Si no existe intersección, devuelve una lista vacía de IDs y un breve mensaje de fallback (ej.: "No hay restaurantes que cumplan todas las condiciones; ¿quieres ver opciones que cumplan la última condición?").
+3) Al final de tu respuesta devuelve exactamente el token: [RECOMENDACION_IDS: id1, id2, ...] (si no hay ids, escribe [RECOMENDACION_IDS:]).
+4) En el texto explica brevemente (1-2 frases por restaurante) por qué lo recomiendas, pero NO incluyas IDs dentro del texto.
+5) NO uses negritas ni formateo con IDs.
 
-FORMATO OBLIGATORIO:
-- Escribe una respuesta conversacional.
-- Termina con: [RECOMENDACION_IDS: id1, id2, ...] (solo los IDs, sin nombres ni otros detalles).
 """
 
     if request.candidates and len(request.candidates) > 0:
         prompt += f"\n\nRESTAURANTES DISPONIBLES ({len(request.candidates)} encontrados):"
         for c in request.candidates:
-            # Construir características destacadas (con valores por defecto seguros)
             features = []
-            if getattr(c, 'featured', None): features.append("⭐ Destacado")
-            if getattr(c, 'serves_alcohol', None): features.append("🍷 Sirve alcohol")
-            if getattr(c, 'rating', None) and c.rating >= 4.0: features.append(f"🌟 Rating: {c.rating}")
-            if getattr(c, 'delivery_time', None): features.append(f"⏱️ {c.delivery_time}")
-            
+            if getattr(c, 'featured', None):
+                features.append("⭐ Destacado")
+            if getattr(c, 'serves_alcohol', None):
+                features.append("🍷 Sirve alcohol")
+            if getattr(c, 'rating', None) and c.rating >= 4.0:
+                features.append(f"🌟 Rating: {c.rating}")
+            if getattr(c, 'delivery_time', None):
+                features.append(f"⏱️ {c.delivery_time}")
+
             features_str = " | ".join(features) if features else "Estándar"
-            
-            # Tags como elementos clave para el análisis
             tags = getattr(c, 'tags', [])
             tags_str = " | ".join(tags) if tags else "Sin tags específicos"
-            
             discount_info = getattr(c, 'discount_info', None)
             tipo_cocina = getattr(c, 'tipo_cocina', 'Cocina variada')
-            
+
             prompt += f"""
-- ID: {c.id} | **{c.name}**
+- ID: {c.id} | {c.name}
   💰 ${c.avg_price_for_two} para dos | {tipo_cocina}
   🏷️ TAGS: {tags_str}
   ✨ {features_str}{f" | 🎯 {discount_info}" if discount_info else ""}
   📍 {c.address}"""
-        
+
         prompt += f"\n\nANÁLISIS: Basándote en los TAGS y características, recomienda los que mejor coincidan con '{request.user_query}'."
     else:
         prompt += "\n\nNo se encontraron restaurantes para esta búsqueda. Sugiere al usuario que intente con otros términos o menos filtros. Termina tu respuesta con [RECOMENDACION_IDS: ]."
@@ -110,7 +106,7 @@ FORMATO OBLIGATORIO:
     try:
         response = chat.send_message(prompt)
         text_response = response.text
-        
+
         # Extraer IDs de la respuesta
         ids_match = re.search(r'\[RECOMENDACION_IDS:\s*([^\]]*)\]', text_response)
         recommendation_ids = []
@@ -120,6 +116,21 @@ FORMATO OBLIGATORIO:
                 recommendation_ids = [int(id.strip()) for id in ids_str.split(',') if id.strip().isdigit()]
             # Limpiar el texto de la respuesta para el usuario
             text_response = re.sub(r'\s*\[RECOMENDACION_IDS:[^\]]*\]\s*', '', text_response).strip()
+
+        # DEFENSA: asegurar que las ids devueltas pertenecen a los candidates
+        valid_candidate_ids = [c.id for c in request.candidates] if request.candidates else []
+        recommendation_ids = [rid for rid in recommendation_ids if rid in valid_candidate_ids]
+
+        # Si previous_candidate_ids fue enviada, aplicar intersección estricta
+        if request.previous_candidate_ids:
+            previous_ids = [int(x) for x in request.previous_candidate_ids]
+            intersection = [rid for rid in recommendation_ids if rid in previous_ids]
+            if intersection:
+                recommendation_ids = intersection
+            else:
+                # No hay intersección: devolver lista vacía y mensaje de fallback
+                recommendation_ids = []
+                text_response = "No hay restaurantes que cumplan todas las condiciones. ¿Quieres ver resultados que solo cumplan la última condición?"
 
         return {"responseText": text_response, "recommendation_ids": recommendation_ids}
     except Exception as e:
@@ -140,13 +151,10 @@ async def recommend_dineout(request: RecommendationRequest):
 def read_root():
     return {"status": "Tootli AI Service is running"}
 
-# Nuevo endpoint para debug
 @app.post("/debug-recommend")
 async def debug_recommend_dineout(request: dict):
-    """Endpoint para debug que acepta cualquier JSON"""
     try:
         print(f"Debug Request: {request}")
-        # Convertir el dict a RecommendationRequest
         recommendation_request = RecommendationRequest(**request)
         return get_recommendation_from_gemini(recommendation_request)
     except Exception as e:
