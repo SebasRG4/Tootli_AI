@@ -1,5 +1,6 @@
 import os
 import re
+import json # Importar json para un mejor formato en el prompt
 import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, ValidationError
@@ -46,7 +47,7 @@ class RecommendationRequest(BaseModel):
 app = FastAPI()
 
 def get_recommendation_from_gemini(request: RecommendationRequest):
-    model = genai.GenerativeModel('gemini-2.5-flash-lite')
+    model = genai.GenerativeModel('gemini-1.5-flash') # Recomiendo usar 1.5 Flash
     chat_history = []
     if request.history:
         for msg in request.history:
@@ -55,36 +56,36 @@ def get_recommendation_from_gemini(request: RecommendationRequest):
 
     chat = model.start_chat(history=chat_history)
 
-    # PROMPT MEJORADO CON TAGS Y REFINAMIENTO
-    prompt = f"""¡Hola! Eres Toot, un asistente amigable que ayuda a encontrar restaurantes.
+    # Convertir filtros a un string legible, ignorando los vacíos.
+    filters_str = "Ninguno"
+    if request.filters:
+        # Usamos json.dumps para un formato limpio y legible
+        filters_str = json.dumps(request.filters, indent=2, ensure_ascii=False)
 
-Consulta: "{request.user_query}"
-Filtros aplicados: {request.filters if request.filters else 'Ninguno'}
+    # --- PROMPT MEJORADO CON CONTEXTO DE FILTROS ---
+    prompt = f"""¡Hola! Eres Toot, un asistente amigable y experto en restaurantes.
+
+El usuario {request.user_name} está buscando: "{request.user_query}"
+
+Filtros aplicados por el usuario:
+{filters_str}
 
 REGLAS OBLIGATORIAS:
-1) SOLO puedes recomendar restaurantes que estén en la lista "RESTAURANTES DISPONIBLES" que te proveo abajo.
-2) Si el request incluye "previous_candidate_ids", considera que el usuario está refinando una búsqueda previa. En ese caso debes RECOMENDAR SOLO aquellos restaurantes que:
-   a) estén en la lista de candidatos proporcionada y
-   b) además estén dentro de previous_candidate_ids (es decir, intersecta la nueva elección con los previos).
-   Si no existe intersección, devuelve una lista vacía de IDs y un breve mensaje de fallback (ej.: "No hay restaurantes que cumplan todas las condiciones; ¿quieres ver opciones que cumplan la última condición?").
-3) Al final de tu respuesta devuelve exactamente el token: [RECOMENDACION_IDS: id1, id2, ...] (si no hay ids, escribe [RECOMENDACION_IDS:]).
-4) En el texto explica brevemente (1-2 frases por restaurante) por qué lo recomiendas, pero NO incluyas IDs dentro del texto.
-5) NO uses negritas ni formateo con IDs.
-
+1.  SOLO puedes recomendar restaurantes de la lista "RESTAURANTES DISPONIBLES". No inventes nada.
+2.  Tu respuesta debe ser conversacional y útil. Explica brevemente (1-2 frases por lugar) por qué tus recomendaciones coinciden con la búsqueda Y los filtros.
+3.  Si el request incluye "previous_candidate_ids", el usuario está refinando su búsqueda. Debes recomendar ÚNICAMENTE restaurantes que estén tanto en los `previous_candidate_ids` como en tu nueva selección. Si no hay coincidencias, informa al usuario amablemente.
+4.  Al final de tu respuesta, DEBES incluir el token `[RECOMENDACION_IDS: id1, id2, ...]`. Si no hay recomendaciones, usa `[RECOMENDACION_IDS:]`.
+5.  NO incluyas los IDs en el texto de la conversación, solo en el token final.
 """
 
     if request.candidates and len(request.candidates) > 0:
-        prompt += f"\n\nRESTAURANTES DISPONIBLES ({len(request.candidates)} encontrados):"
+        prompt += f"\n\nRESTAURANTES DISPONIBLES ({len(request.candidates)} encontrados que ya cumplen los filtros):"
         for c in request.candidates:
             features = []
-            if getattr(c, 'featured', None):
-                features.append("⭐ Destacado")
-            if getattr(c, 'serves_alcohol', None):
-                features.append("🍷 Sirve alcohol")
-            if getattr(c, 'rating', None) and c.rating >= 4.0:
-                features.append(f"🌟 Rating: {c.rating}")
-            if getattr(c, 'delivery_time', None):
-                features.append(f"⏱️ {c.delivery_time}")
+            if getattr(c, 'featured', None): features.append("⭐ Destacado")
+            if getattr(c, 'serves_alcohol', None): features.append("🍷 Sirve alcohol")
+            if getattr(c, 'rating', None) and c.rating >= 4.0: features.append(f"🌟 Rating: {c.rating}")
+            if getattr(c, 'delivery_time', None): features.append(f"⏱️ {c.delivery_time}")
 
             features_str = " | ".join(features) if features else "Estándar"
             tags = getattr(c, 'tags', [])
@@ -94,14 +95,15 @@ REGLAS OBLIGATORIAS:
 
             prompt += f"""
 - ID: {c.id} | {c.name}
-  💰 ${c.avg_price_for_two} para dos | {tipo_cocina}
-  🏷️ TAGS: {tags_str}
-  ✨ {features_str}{f" | 🎯 {discount_info}" if discount_info else ""}
-  📍 {c.address}"""
+  - Cocina: {tipo_cocina}
+  - Precio aprox. para dos: ${c.avg_price_for_two}
+  - Tags: {tags_str}
+  - Características: {features_str}{f" | Descuento: {discount_info}" if discount_info else ""}
+  - Dirección: {c.address}"""
 
-        prompt += f"\n\nANÁLISIS: Basándote en los TAGS y características, recomienda los que mejor coincidan con '{request.user_query}'."
+        prompt += f"\n\nANÁLISIS: Basado en la búsqueda '{request.user_query}' y los filtros, ¿cuáles de estos restaurantes son la mejor opción? Justifica tu elección."
     else:
-        prompt += "\n\nNo se encontraron restaurantes para esta búsqueda. Sugiere al usuario que intente con otros términos o menos filtros. Termina tu respuesta con [RECOMENDACION_IDS: ]."
+        prompt += "\n\nNo se encontraron restaurantes que coincidan con todos los filtros y la búsqueda. Sugiere al usuario que intente con otros términos o que quite algunos filtros. Termina tu respuesta con [RECOMENDACION_IDS:]."
 
     try:
         response = chat.send_message(prompt)
@@ -114,23 +116,20 @@ REGLAS OBLIGATORIAS:
             ids_str = ids_match.group(1)
             if ids_str:
                 recommendation_ids = [int(id.strip()) for id in ids_str.split(',') if id.strip().isdigit()]
-            # Limpiar el texto de la respuesta para el usuario
             text_response = re.sub(r'\s*\[RECOMENDACION_IDS:[^\]]*\]\s*', '', text_response).strip()
 
         # DEFENSA: asegurar que las ids devueltas pertenecen a los candidates
         valid_candidate_ids = [c.id for c in request.candidates] if request.candidates else []
         recommendation_ids = [rid for rid in recommendation_ids if rid in valid_candidate_ids]
 
-        # Si previous_candidate_ids fue enviada, aplicar intersección estricta
+        # Si previous_candidate_ids fue enviada, aplicar intersección
         if request.previous_candidate_ids:
             previous_ids = [int(x) for x in request.previous_candidate_ids]
             intersection = [rid for rid in recommendation_ids if rid in previous_ids]
-            if intersection:
-                recommendation_ids = intersection
-            else:
-                # No hay intersección: devolver lista vacía y mensaje de fallback
-                recommendation_ids = []
-                text_response = "No hay restaurantes que cumplan todas las condiciones. ¿Quieres ver resultados que solo cumplan la última condición?"
+            
+            # Si hay intersección, esos son los resultados. Si no, la IA ya debería haber generado un mensaje de fallback.
+            recommendation_ids = intersection
+
 
         return {"responseText": text_response, "recommendation_ids": recommendation_ids}
     except Exception as e:
@@ -140,11 +139,10 @@ REGLAS OBLIGATORIAS:
 @app.post("/recommend")
 async def recommend_dineout(request: RecommendationRequest):
     try:
-        print(f"Request recibido: {request.dict()}")  # DEBUG
+        print(f"Request recibido: {request.dict()}")
         return get_recommendation_from_gemini(request)
     except ValidationError as e:
-        print(f"Validation Error: {e}")
-        print(f"Validation Error details: {e.errors()}")  # DEBUG
+        print(f"Validation Error: {e.errors()}")
         raise HTTPException(status_code=422, detail=f"Invalid request: {e.errors()}")
 
 @app.get("/")
