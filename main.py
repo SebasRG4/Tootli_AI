@@ -5,6 +5,9 @@ import google.generativeai as genai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 from typing import List, Optional, Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     GOOGLE_API_KEY = os.environ['GOOGLE_API_KEY']
@@ -47,7 +50,7 @@ class RecommendationRequest(BaseModel):
 app = FastAPI()
 
 def get_recommendation_from_gemini(request: RecommendationRequest):
-    model = genai.GenerativeModel('gemini-2.5-flash') # Recomiendo usar 1.5 Flash
+    model = genai.GenerativeModel('gemini-2.5-flash') # User requested 2.5
     chat_history = []
     if request.history:
         for msg in request.history:
@@ -144,6 +147,42 @@ async def recommend_dineout(request: RecommendationRequest):
     except ValidationError as e:
         print(f"Validation Error: {e.errors()}")
         raise HTTPException(status_code=422, detail=f"Invalid request: {e.errors()}")
+
+class EmbeddingRequest(BaseModel):
+    text: str
+
+@app.post("/get-embedding")
+async def get_embedding(request: EmbeddingRequest):
+    try:
+        # Generate embedding using the "models/gemini-embedding-001" model
+        result = genai.embed_content(
+            model="models/gemini-embedding-001",
+            content=request.text,
+            task_type="retrieval_document"
+        )
+        return {"embedding": result['embedding']}
+    except Exception as e:
+        print(f"Error generating embedding: {e}")
+        raise HTTPException(status_code=500, detail=f"Embedding Error: {str(e)}")
+
+class BatchEmbeddingRequest(BaseModel):
+    texts: List[str]
+
+@app.post("/get-embeddings-batch")
+async def get_embeddings_batch(request: BatchEmbeddingRequest):
+    try:
+        # Generate embeddings in batch
+        # GEMINI supports list of strings for 'content'
+        result = genai.embed_content(
+            model="models/gemini-embedding-001",
+            content=request.texts,
+            task_type="retrieval_document"
+        )
+        # result['embedding'] will be a list of lists (vectors)
+        return {"embeddings": result['embedding']}
+    except Exception as e:
+        print(f"Error generating batch embeddings: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch Embedding Error: {str(e)}")
 
 @app.get("/")
 def read_root():

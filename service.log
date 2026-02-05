@@ -1,0 +1,87 @@
+INFO:     Will watch for changes in these directories: ['/Users/giovannavilchis/Herd/back3.6/Tootli_AI']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [7963] using StatReload
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/main.py:4: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+Process SpawnProcess-1:
+Traceback (most recent call last):
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/main.py", line 10, in <module>
+    GOOGLE_API_KEY = os.environ['GOOGLE_API_KEY']
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/os.py", line 679, in __getitem__
+    raise KeyError(key) from None
+KeyError: 'GOOGLE_API_KEY'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/process.py", line 315, in _bootstrap
+    self.run()
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/_subprocess.py", line 80, in subprocess_started
+    target(sockets=sockets)
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/server.py", line 67, in run
+    return asyncio_run(self.serve(sockets=sockets), loop_factory=self.config.get_loop_factory())
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/_compat.py", line 60, in asyncio_run
+    return loop.run_until_complete(main)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/asyncio/base_events.py", line 642, in run_until_complete
+    return future.result()
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/server.py", line 71, in serve
+    await self._serve(sockets)
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/server.py", line 78, in _serve
+    config.load()
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/config.py", line 439, in load
+    self.loaded_app = import_from_string(self.app)
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/uvicorn/importer.py", line 19, in import_from_string
+    module = importlib.import_module(module_str)
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/importlib/__init__.py", line 127, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1030, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1007, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 986, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 680, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 850, in exec_module
+  File "<frozen importlib._bootstrap>", line 228, in _call_with_frames_removed
+  File "/Users/giovannavilchis/Herd/back3.6/Tootli_AI/main.py", line 13, in <module>
+    raise RuntimeError("La variable de entorno GOOGLE_API_KEY no está configurada.")
+RuntimeError: La variable de entorno GOOGLE_API_KEY no está configurada.
+WARNING:  StatReload detected changes in 'main.py'. Reloading...
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/google/api_core/_python_version_support.py:246: FutureWarning: You are using a non-supported Python version (3.9.6). Google will not post any further updates to google.api_core supporting this Python version. Please upgrade to the latest Python version, or at least Python 3.10, and then update google.api_core.
+  warnings.warn(message, FutureWarning)
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/venv/lib/python3.9/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/giovannavilchis/Herd/back3.6/Tootli_AI/main.py:4: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+INFO:     Started server process [9132]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+Request recibido: {'user_query': 'hamburguesa', 'user_name': 'Giovanni', 'filters': {}, 'candidates': [{'id': 1, 'name': 'Burger King', 'address': '123 Main St', 'avg_price_for_two': 150.0, 'description': 'Best burgers', 'tags': ['Fast Food'], 'discount_info': None, 'rating': None, 'serves_alcohol': None, 'featured': None, 'delivery_time': None, 'tipo_cocina': None}], 'history': None, 'previous_candidate_ids': None}
+INFO:     127.0.0.1:50690 - "POST /recommend HTTP/1.1" 200 OK
+Request recibido: {'user_query': 'hola busco un restaurante de comida mexicana', 'user_name': 'Sebastian', 'filters': {'zone_id': 2, 'detected_categories': ['Mexicana'], 'context': []}, 'candidates': [], 'history': [], 'previous_candidate_ids': None}
+INFO:     127.0.0.1:51996 - "POST /recommend HTTP/1.1" 200 OK
