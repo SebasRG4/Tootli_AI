@@ -32,9 +32,16 @@ class Candidate(BaseModel):
     featured: Optional[bool] = None
     delivery_time: Optional[str] = None
     tipo_cocina: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    distance_km: Optional[float] = None
 
     class Config:
         extra = "ignore"
+
+class UserLocation(BaseModel):
+    latitude: float
+    longitude: float
 
 class RecommendationRequest(BaseModel):
     user_query: str
@@ -43,6 +50,7 @@ class RecommendationRequest(BaseModel):
     candidates: Optional[List[Candidate]] = None
     history: Optional[List[Message]] = None
     previous_candidate_ids: Optional[List[int]] = None
+    user_location: Optional[UserLocation] = None
 
     class Config:
         extra = "ignore"
@@ -79,6 +87,8 @@ REGLAS OBLIGATORIAS:
 3.  Si el request incluye "previous_candidate_ids", el usuario está refinando su búsqueda. Debes recomendar ÚNICAMENTE restaurantes que estén tanto en los `previous_candidate_ids` como en tu nueva selección. Si no hay coincidencias, informa al usuario amablemente.
 4.  Al final de tu respuesta, DEBES incluir el token `[RECOMENDACION_IDS: id1, id2, ...]`. Si no hay recomendaciones, usa `[RECOMENDACION_IDS:]`.
 5.  NO incluyas los IDs en el texto de la conversación, solo en el token final.
+6.  Si el usuario pregunta por cercanía, distancia o cuál le queda más cerca, usa el campo 'distance_km' de cada restaurante para responder con PRECISIÓN. Indica la distancia exacta en kilómetros. Ordena tus recomendaciones del más cercano al más lejano.
+7.  Si el usuario hace preguntas de seguimiento (como cercanía, precio, horario), da respuestas DETALLADAS usando toda la información disponible de los restaurantes.
 """
 
     if request.candidates and len(request.candidates) > 0:
@@ -95,6 +105,7 @@ REGLAS OBLIGATORIAS:
             tags_str = " | ".join(tags) if tags else "Sin tags específicos"
             discount_info = getattr(c, 'discount_info', None)
             tipo_cocina = getattr(c, 'tipo_cocina', 'Cocina variada')
+            distance_km = getattr(c, 'distance_km', None)
 
             prompt += f"""
 - ID: {c.id} | {c.name}
@@ -102,7 +113,8 @@ REGLAS OBLIGATORIAS:
   - Precio aprox. para dos: ${c.avg_price_for_two}
   - Tags: {tags_str}
   - Características: {features_str}{f" | Descuento: {discount_info}" if discount_info else ""}
-  - Dirección: {c.address}"""
+  - Dirección: {c.address}
+  - Distancia del usuario: {f"{distance_km} km" if distance_km is not None else "No disponible"}"""
 
         prompt += f"\n\nANÁLISIS: Basado en la búsqueda '{request.user_query}' y los filtros, ¿cuáles de estos restaurantes son la mejor opción? Justifica tu elección."
     else:
