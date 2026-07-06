@@ -35,6 +35,8 @@ class Candidate(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     distance_km: Optional[float] = None
+    items: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    coupons: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
 
     class Config:
         extra = "ignore"
@@ -58,7 +60,7 @@ class RecommendationRequest(BaseModel):
 app = FastAPI()
 
 def get_recommendation_from_gemini(request: RecommendationRequest):
-    model = genai.GenerativeModel('gemini-2.5-flash') # User requested 2.5
+    model = genai.GenerativeModel('gemini-1.5-flash') # 15 req/min free tier vs 5 in 2.5-flash
     chat_history = []
     if request.history:
         for msg in request.history:
@@ -89,6 +91,10 @@ REGLAS OBLIGATORIAS:
 5.  NO incluyas los IDs en el texto de la conversación, solo en el token final.
 6.  Si el usuario pregunta por cercanía, distancia o cuál le queda más cerca, usa el campo 'distance_km' de cada restaurante para responder con PRECISIÓN. Indica la distancia exacta en kilómetros. Ordena tus recomendaciones del más cercano al más lejano.
 7.  Si el usuario hace preguntas de seguimiento (como cercanía, precio, horario), da respuestas DETALLADAS usando toda la información disponible de los restaurantes.
+8.  **OPCIÓN DE PRESUPUESTO (Smart Budget Matcher)**: Si el usuario indica un presupuesto máximo (ej. "Tengo $300"), analiza los precios del campo "Menú disponible" de los restaurantes candidatos y cruza la información con los "Cupones de descuento activos". Calcula combinaciones reales de platillos que quepan dentro del presupuesto del usuario aplicando el descuento correspondiente, explicando el cálculo y los precios con precisión matemática.
+9.  **OPCIÓN DE RUTA / ITINERARIO (Gastronomic Routes)**: Si el usuario solicita una ruta gastronómica, tour, crawl, itinerario o recorrido de varios lugares (ej. "ruta de postres", "tour de tacos"), DEBES:
+    a) Recomendar de 2 a 4 restaurantes candidatos en una secuencia lógica (ej. entrada, plato fuerte, postre, o cercanía).
+    b) Añadir al final de tu respuesta el token `[ROUTE: true]`. De lo contrario, si es una búsqueda normal de lugares individuales, añade `[ROUTE: false]`.
 """
 
     if request.candidates and len(request.candidates) > 0:
@@ -107,10 +113,20 @@ REGLAS OBLIGATORIAS:
             tipo_cocina = getattr(c, 'tipo_cocina', 'Cocina variada')
             distance_km = getattr(c, 'distance_km', None)
 
+            # Format items
+            items_list = getattr(c, 'items', [])
+            items_str = ", ".join([f"{item['name']} (${item['price']})" for item in items_list]) if items_list else "No disponible"
+
+            # Format coupons
+            coupons_list = getattr(c, 'coupons', [])
+            coupons_str = ", ".join([f"Código {coupon['code']}: {coupon['title']} (Desc: {coupon['discount']} {coupon['discount_type']})" for coupon in coupons_list]) if coupons_list else "Sin cupones activos"
+
             prompt += f"""
 - ID: {c.id} | {c.name}
   - Cocina: {tipo_cocina}
   - Precio aprox. para dos: ${c.avg_price_for_two}
+  - Menú disponible (platillos destacados y precios): {items_str}
+  - Cupones de descuento activos para este restaurante: {coupons_str}
   - Tags: {tags_str}
   - Características: {features_str}{f" | Descuento: {discount_info}" if discount_info else ""}
   - Dirección: {c.address}
@@ -133,6 +149,13 @@ REGLAS OBLIGATORIAS:
                 recommendation_ids = [int(id.strip()) for id in ids_str.split(',') if id.strip().isdigit()]
             text_response = re.sub(r'\s*\[RECOMENDACION_IDS:[^\]]*\]\s*', '', text_response).strip()
 
+        # Extraer bandera de ruta [ROUTE: true/false]
+        is_route = False
+        route_match = re.search(r'\[ROUTE:\s*(true|false)\]', text_response, re.IGNORECASE)
+        if route_match:
+            is_route = route_match.group(1).lower() == 'true'
+            text_response = re.sub(r'\s*\[ROUTE:\s*(true|false)\]\s*', '', text_response, flags=re.IGNORECASE).strip()
+
         # DEFENSA: asegurar que las ids devueltas pertenecen a los candidates
         valid_candidate_ids = [c.id for c in request.candidates] if request.candidates else []
         recommendation_ids = [rid for rid in recommendation_ids if rid in valid_candidate_ids]
@@ -145,8 +168,7 @@ REGLAS OBLIGATORIAS:
             # Si hay intersección, esos son los resultados. Si no, la IA ya debería haber generado un mensaje de fallback.
             recommendation_ids = intersection
 
-
-        return {"responseText": text_response, "recommendation_ids": recommendation_ids}
+        return {"responseText": text_response, "recommendation_ids": recommendation_ids, "is_route": is_route}
     except Exception as e:
         print(f"Error al llamar a la API de Gemini: {e}")
         raise HTTPException(status_code=503, detail=f"El servicio de IA (Gemini) no está disponible: {str(e)}")
@@ -209,3 +231,91 @@ async def debug_recommend_dineout(request: dict):
     except Exception as e:
         print(f"Debug Error: {e}")
         return {"error": str(e), "received_data": request}
+
+import base64
+
+class MenuExtractRequest(BaseModel):
+    image_base64: str
+    mime_type: str
+
+@app.post("/extract-menu")
+async def extract_menu(request: MenuExtractRequest):
+    try:
+        # Decode base64 to bytes
+        image_bytes = base64.b64decode(request.image_base64)
+        
+        # Prepare the model
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = """Analiza la imagen de este menú de restaurante. Extrae todos los platillos, bebidas y postres con sus respectivos precios y descripciones.
+        Debes responder estrictamente con un objeto JSON válido que tenga una propiedad llamada 'items' que contenga un arreglo de objetos. Cada objeto debe tener exactamente los siguientes campos:
+        - 'name': Nombre del platillo o bebida (limpio y bien escrito).
+        - 'description': Descripción del platillo o sus ingredientes (si no tiene descripción, genera una descripción corta apetitosa basada en su nombre).
+        - 'price': Precio base como un número flotante o entero sin signos de pesos ni comas (ej. 150.00). Si hay varias opciones de precio según el tamaño, usa el precio de la opción más económica como precio base. Si no tiene precio, calcula un precio estimado promedio de 120.00.
+        - 'suggested_category': El nombre de la categoría a la que pertenece (ej. 'Entradas', 'Platos Fuertes', 'Bebidas', 'Postres', 'Tacos', 'Pizzas').
+        - 'available_time_starts': Hora de inicio en que se sirve el platillo en formato "HH:MM:SS" (ej. "08:00:00" si es un desayuno, de lo contrario por defecto "00:00:00").
+        - 'available_time_ends': Hora de fin en que se sirve el platillo en formato "HH:MM:SS" (ej. "12:30:00" si es un desayuno, de lo contrario por defecto "23:59:59").
+        - 'variations': Un arreglo de grupos de variantes/adicionales (opciones) si el platillo las tiene (ej. tamaños: "Chico $90, Grande $120", proteínas: "Pollo/Res", o extras: "Extra Queso +$15"). Si no tiene variantes, este arreglo debe ser un arreglo vacío []. Cada objeto de grupo en este arreglo debe tener exactamente esta estructura:
+          * 'name': Nombre del grupo de variación (ej. "Tamaño", "Proteína", "Extras").
+          * 'type': 'single' (si solo se puede seleccionar una opción) o 'multi' (si se pueden elegir múltiples opciones).
+          * 'min': Entero (ej. 1 si es obligatorio y 'single', o 0 si es opcional).
+          * 'max': Entero (ej. 1 si es 'single', o el número de opciones si es 'multi').
+          * 'required': 'on' (si es obligatorio seleccionar al menos uno) o 'off' (si es opcional).
+          * 'values': Un arreglo de objetos, donde cada objeto representa una opción del grupo:
+            - 'label': Nombre de la opción (ej. "Chico", "Grande", "Pollo", "Extra Queso").
+            - 'optionPrice': El costo ADICIONAL (como número flotante) con respecto al precio base del platillo (ej. si el platillo cuesta $90 base y la opción Grande cuesta $120, el optionPrice para "Chico" es 0.0 y para "Grande" es 30.0. Si la opción de extra es +$15, el optionPrice es 15.0).
+        
+        Responde únicamente en formato JSON estructurado, sin texto de introducción, sin bloques markdown de código ```json ... ```, solo el JSON puro."""
+        
+        image_data = {
+            'mime_type': request.mime_type,
+            'data': image_bytes
+        }
+        
+        # Call Gemini model
+        response = model.generate_content([image_data, prompt])
+        text_response = response.text
+        
+        # Clean the output in case the model returns markdown code block
+        text_response = text_response.strip()
+        if text_response.startswith("```json"):
+            text_response = text_response[7:]
+        if text_response.startswith("```"):
+            text_response = text_response[3:]
+        if text_response.endswith("```"):
+            text_response = text_response[:-3]
+        text_response = text_response.strip()
+        
+        # Parse it to verify it is valid JSON
+        data = json.loads(text_response)
+        
+        return data
+        
+    except Exception as e:
+        print(f"Error in extract_menu: {e}")
+        raise HTTPException(status_code=500, detail=f"Error extracting menu: {str(e)}")
+
+from fastapi import File, UploadFile
+from fastapi.responses import Response
+from rembg import remove
+from PIL import Image
+import io
+
+@app.post("/remove-bg")
+async def remove_background(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        input_image = Image.open(io.BytesIO(contents))
+        
+        # Run background removal
+        output_image = remove(input_image)
+        
+        # Save output image to buffer as PNG (which supports transparency)
+        img_byte_arr = io.BytesIO()
+        output_image.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+        
+        return Response(content=img_byte_arr, media_type="image/png")
+    except Exception as e:
+        print(f"Error in remove_background: {e}")
+        raise HTTPException(status_code=500, detail=f"Error removing background: {str(e)}")
